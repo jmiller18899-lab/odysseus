@@ -272,6 +272,26 @@ If `chromadb-client` (the lightweight HTTP-only package) is installed alongside 
 ./venv/bin/pip install --force-reinstall chromadb
 ```
 
+### Locked out / lost the admin password
+The first admin password is printed once in the startup logs (Docker: `docker
+compose logs odysseus`; Railway: the deploy logs). If you missed it or the
+account already exists, reset it without disabling auth:
+
+1. Set both env vars on the service:
+   ```bash
+   ODYSSEUS_ADMIN_PASSWORD=your-new-password   # at least 8 characters
+   ODYSSEUS_ADMIN_PASSWORD_RESET=true
+   ```
+   (Optionally `ODYSSEUS_ADMIN_USER=yourname` to target a non-default admin.)
+2. Restart / redeploy. On boot, setup resets that admin account's password
+   (creating it if missing); other users and settings are left untouched.
+3. Log in, then **remove `ODYSSEUS_ADMIN_PASSWORD_RESET`** so the password
+   isn't reset again on the next restart.
+
+This keeps `AUTH_ENABLED=true`. Turning auth off is only appropriate for
+local-only runs or when a private access layer (Cloudflare Access, Tailscale)
+already authenticates every request — never on a raw public URL.
+
 ### HTTPS + LAN/Tailscale exposure
 To expose Odysseus on a local network or Tailscale with HTTPS:
 1. Change the bind address to `0.0.0.0` in `.env` (`APP_BIND=0.0.0.0` or `ODYSSEUS_HOST=0.0.0.0`).
@@ -376,6 +396,8 @@ Key settings:
 | `APP_DATA_DIR` | `./data` | Docker Compose host directory for application data volumes. |
 | `APP_LOGS_DIR` | `./logs` | Docker Compose host directory for application logs. |
 | `AUTH_ENABLED` | `true` | Enable/disable login |
+| `ODYSSEUS_ADMIN_PASSWORD` | -- | Pre-seed the admin password on first setup (instead of a generated temp password). |
+| `ODYSSEUS_ADMIN_PASSWORD_RESET` | `false` | Recovery switch. When truthy, setup resets the admin password to `ODYSSEUS_ADMIN_PASSWORD` even if `auth.json` already exists (other users/settings untouched). Remove it after logging in. |
 | `LOCALHOST_BYPASS` | `false` | Development-only auth bypass for loopback requests. Keep false for shared/network deployments. |
 | `ALLOWED_ORIGINS` | `http://localhost,http://127.0.0.1` | Comma-separated exact permitted origins for cross-origin browser/API clients. |
 | `CLAWAGENT_URL` | -- | If set to an `http(s)` URL, enables the sidebar **clawagent** tab, which frames that app at `/clawagent`. Only this origin is allowed in that page's CSP `frame-src`; the framed app must also send `Content-Security-Policy: frame-ancestors <your-odysseus-origin>`. |

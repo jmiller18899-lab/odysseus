@@ -153,6 +153,82 @@ def create_default_admin():
         return "skipped"
 
 
+def _admin_reset_requested():
+    """True when an explicit, opt-in admin password reset was asked for.
+
+    Gated on its own flag (not just ODYSSEUS_ADMIN_PASSWORD) so a routine
+    redeploy that keeps the password env var set never silently rewrites the
+    stored password on every boot. The operator sets the flag once, redeploys,
+    logs in, then removes it.
+    """
+    flag = os.getenv("ODYSSEUS_ADMIN_PASSWORD_RESET", "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
+
+
+def reset_admin_password():
+    """Reset (or seed) the admin password from env, even if auth.json exists.
+
+    Updates only the target admin user's password hash and admin flag; all
+    other users and settings in auth.json are left untouched. Falls back to
+    creating auth.json if it doesn't exist yet. Opt-in via
+    ODYSSEUS_ADMIN_PASSWORD_RESET — see _admin_reset_requested().
+    """
+    try:
+        import bcrypt
+        import json
+
+        username = os.getenv("ODYSSEUS_ADMIN_USER", "").strip().lower() or "admin"
+        password = os.getenv("ODYSSEUS_ADMIN_PASSWORD", "").strip()
+
+        if not password:
+            print("  [error] ODYSSEUS_ADMIN_PASSWORD_RESET is set but "
+                  "ODYSSEUS_ADMIN_PASSWORD is empty — nothing to reset to")
+            return "failed"
+        if username in RESERVED_USERNAMES:
+            print(f"  [error] ODYSSEUS_ADMIN_USER '{username}' is a reserved username")
+            return "failed"
+        if len(password) < PASSWORD_MIN_LENGTH:
+            print(f"  [error] ODYSSEUS_ADMIN_PASSWORD must be at least {PASSWORD_MIN_LENGTH} characters")
+            return "failed"
+
+        auth_path = AUTH_FILE
+        auth_data = {"users": {}}
+        if os.path.exists(auth_path):
+            try:
+                with open(auth_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    auth_data = loaded
+            except (ValueError, OSError) as e:
+                print(f"  [warn] Could not read existing auth.json ({e}); rewriting it")
+                auth_data = {"users": {}}
+
+        users = auth_data.setdefault("users", {})
+        if not isinstance(users, dict):
+            users = {}
+            auth_data["users"] = users
+
+        existed = username in users
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        entry = users.get(username) if isinstance(users.get(username), dict) else {}
+        entry["password_hash"] = hashed
+        entry["is_admin"] = True
+        users[username] = entry
+
+        with open(auth_path, "w", encoding="utf-8") as f:
+            json.dump(auth_data, f, indent=2)
+
+        verb = "reset" if existed else "created"
+        print(f"  [ok] Admin password {verb} for '{username}' from ODYSSEUS_ADMIN_PASSWORD")
+        print("        ** Remove ODYSSEUS_ADMIN_PASSWORD_RESET after logging in so the "
+              "password isn't reset on every redeploy. **")
+        return "reset"
+    except ImportError:
+        print("  [warn] bcrypt not installed — skipping admin password reset")
+        print("         Run: pip install bcrypt")
+        return "skipped"
+
+
 def create_env():
     """Copy .env.example to .env if it doesn't exist."""
     env_path = os.path.join(BASE_DIR, ".env")
@@ -264,7 +340,10 @@ def main():
     admin_status = "failed"
 
     try:
-        admin_status = create_default_admin()
+        if _admin_reset_requested():
+            admin_status = reset_admin_password()
+        else:
+            admin_status = create_default_admin()
     except Exception as e:
         print(f"  [warn] Admin creation failed: {e}")
         admin_status = "failed"
@@ -280,6 +359,9 @@ def main():
     # Cleaned, action-focused final instruction strings
     if admin_status == "created":
         print("Login with your admin credentials.\n")
+    elif admin_status == "reset":
+        print("Admin password was reset from ODYSSEUS_ADMIN_PASSWORD. "
+              "Log in, then remove ODYSSEUS_ADMIN_PASSWORD_RESET.\n")
     elif admin_status == "exists":
         print("Login with your existing admin credentials.\n")
     elif admin_status == "skipped":

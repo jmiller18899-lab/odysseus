@@ -61,6 +61,13 @@ confirmed Postgres works. SQLite-on-volume is the safe default.
 (`admin` user unless `ODYSSEUS_ADMIN_USER` is set). Log in, change it
 immediately in Settings, and disable open signup in `data/auth.json`.
 
+**Lost it / locked out?** Don't disable auth. Set
+`ODYSSEUS_ADMIN_PASSWORD=<new password>` and `ODYSSEUS_ADMIN_PASSWORD_RESET=true`
+on the `odysseus` service and redeploy — setup resets the admin password on
+boot (the volume's `auth.json` is updated in place, other users/settings kept).
+Log in, then **remove `ODYSSEUS_ADMIN_PASSWORD_RESET`** so it doesn't reset on
+every future redeploy.
+
 **Acceptance:**
 - `GET https://<your-app>.up.railway.app/login` → HTTP 200.
 - Admin login works and the temp password is rotated.
